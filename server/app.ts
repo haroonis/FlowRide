@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import type { DB } from './db.ts';
 import { purgeExpired } from './db.ts';
 import { normalisePhone } from './phone.ts';
+import type { Vault } from './crypto.ts';
 
 export interface Config {
   adminToken: string | null;
@@ -11,6 +12,9 @@ export interface Config {
   privacyEmail: string;
   publicUrl: string;
   rateLimit: number; // create actions per IP per 10 minutes
+  vault: Vault;
+  adminMaxFails?: number; // wrong admin passwords per IP per 15 minutes before lock-out
+  linkMaxFails?: number;  // unknown private links per IP per 15 minutes before lock-out
 }
 
 class HttpError extends Error {
@@ -27,8 +31,10 @@ export function newId(len = 10) {
 const newToken = (kind: 'o' | 'r') => `${kind}.${crypto.randomBytes(24).toString('base64url')}`;
 const hash = (t: string) => crypto.createHash('sha256').update(t).digest('hex');
 
+// Invisible and direction-changing characters can disguise names (e.g. U+202E flips text).
+const INVISIBLE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
 function text(v: unknown, field: string, { min = 1, max = 80 } = {}): string {
-  const s = typeof v === 'string' ? v.trim().replace(/\s+/g, ' ') : '';
+  const s = typeof v === 'string' ? v.normalize('NFC').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim() : '';
   if (s.length < min) throw new HttpError(400, `${field} is required`);
   if (s.length > max) throw new HttpError(400, `${field} must be ${max} characters or fewer`);
   return s;
@@ -56,8 +62,8 @@ const firstName = (name: string) => name.split(' ')[0];
 // ---------- row types ----------
 
 interface EventRow { id: string; title: string; venue: string; address: string; starts_at: string; description: string; purged_at: string | null }
-interface OfferRow { id: string; event_id: string; name: string; area: string; depart_time: string; seats: number; notes: string; phone: string; whatsapp: number; created_at: string }
-interface RequestRow { id: string; offer_id: string; name: string; area: string; passengers: number; message: string; phone: string; whatsapp: number; status: string; created_at: string; updated_at: string }
+interface OfferRow { id: string; event_id: string; name: string; area: string; depart_time: string; seats: number; notes: string; phone: string; phone_hmac: string; token_hash: string; whatsapp: number; created_at: string }
+interface RequestRow { id: string; offer_id: string; name: string; area: string; passengers: number; message: string; phone: string; phone_hmac: string; token_hash: string; whatsapp: number; status: string; created_at: string; updated_at: string }
 
 const publicEvent = (e: EventRow) => ({
   id: e.id, title: e.title, venue: e.venue, address: e.address,
@@ -66,34 +72,43 @@ const publicEvent = (e: EventRow) => ({
 
 export function createApp(db: DB, config: Config) {
   const app = express();
+  const { vault } = config;
+  const prod = process.env.NODE_ENV === 'production';
   app.disable('x-powered-by');
   if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY);
 
   // Security + privacy headers. no-referrer stops manage links leaking to WhatsApp etc.
   app.use((_req, res, next) => {
-    if (process.env.NODE_ENV === 'production') res.set('Content-Security-Policy',
+    if (prod) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    if (prod) res.set('Content-Security-Policy',
       "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
     res.set({
       'Referrer-Policy': 'no-referrer',
       'X-Content-Type-Options': 'nosniff',
       'X-Frame-Options': 'DENY',
       'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), interest-cohort=()',
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Resource-Policy': 'same-origin',
     });
     next();
   });
   app.use('/api', express.json({ limit: '20kb' }));
   app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
-  // In-memory rate limit for actions that create data. Nothing is persisted.
+  // In-memory counters per IP (nothing persisted, so no extra personal data is kept).
   const hits = new Map<string, { n: number; reset: number }>();
-  const limited = (req: Request, _res: Response, next: NextFunction) => {
-    const key = req.ip ?? 'unknown';
+  const count = (key: string, windowMs: number) => {
     const now = Date.now();
     const h = hits.get(key);
-    if (!h || h.reset < now) hits.set(key, { n: 1, reset: now + 10 * 60_000 });
-    else if (++h.n > config.rateLimit) return next(new HttpError(429, 'Too many requests, please try again in a few minutes'));
+    if (!h || h.reset < now) { hits.set(key, { n: 1, reset: now + windowMs }); return 1; }
+    return ++h.n;
+  };
+  const peek = (key: string) => { const h = hits.get(key); return h && h.reset > Date.now() ? h.n : 0; };
+  const limited = (req: Request, _res: Response, next: NextFunction) => {
+    if (count('create:' + req.ip, 10 * 60_000) > config.rateLimit) return next(new HttpError(429, 'Too many requests, please try again in a few minutes'));
     next();
   };
+  const adminMax = config.adminMaxFails ?? 10, linkMax = config.linkMaxFails ?? 30;
   setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (v.reset < now) hits.delete(k); }, 60_000).unref();
 
   const q = {
@@ -115,7 +130,7 @@ export function createApp(db: DB, config: Config) {
   const assertOpen = (e: EventRow) => {
     if (new Date(e.starts_at).getTime() < Date.now()) throw new HttpError(409, 'This event has already started');
   };
-  const contact = (row: { phone: string; whatsapp: number }) => ({ phone: '+' + row.phone, whatsapp: !!row.whatsapp });
+  const contact = (row: { phone: string; whatsapp: number }) => ({ phone: '+' + vault.decrypt(row.phone), whatsapp: !!row.whatsapp });
 
   // ---------- public ----------
 
@@ -163,9 +178,9 @@ export function createApp(db: DB, config: Config) {
       whatsapp: b.whatsapp === false ? 0 : 1,
     };
     const token = newToken('o');
-    db.prepare(`INSERT INTO offers (id,event_id,name,area,depart_time,seats,notes,phone,whatsapp,token_hash)
-      VALUES (@id,@event_id,@name,@area,@depart_time,@seats,@notes,@phone,@whatsapp,@token_hash)`)
-      .run({ ...row, token_hash: hash(token) });
+    db.prepare(`INSERT INTO offers (id,event_id,name,area,depart_time,seats,notes,phone,phone_hmac,whatsapp,token_hash)
+      VALUES (@id,@event_id,@name,@area,@depart_time,@seats,@notes,@phone,@phone_hmac,@whatsapp,@token_hash)`)
+      .run({ ...row, phone: vault.encrypt(row.phone), phone_hmac: vault.blindIndex(row.phone), token_hash: hash(token) });
     res.status(201).json({ id: row.id, token });
   });
 
@@ -179,15 +194,16 @@ export function createApp(db: DB, config: Config) {
     const passengers = int(b.passengers ?? 1, 'Passengers', 1, 8);
     if (passengers > seatsLeft(o)) throw new HttpError(409, `Only ${Math.max(0, seatsLeft(o))} seat(s) left in this car`);
     const p = phone(b.phone);
-    if (p === o.phone) throw new HttpError(400, "You can't request a seat in your own car");
-    const dup = db.prepare(`SELECT 1 FROM requests WHERE offer_id = ? AND phone = ? AND status IN ('pending','accepted')`).get(o.id, p);
+    const mac = vault.blindIndex(p);
+    if (mac === o.phone_hmac) throw new HttpError(400, "You can't request a seat in your own car");
+    const dup = db.prepare(`SELECT 1 FROM requests WHERE offer_id = ? AND phone_hmac = ? AND status IN ('pending','accepted')`).get(o.id, mac);
     if (dup) throw new HttpError(409, 'You have already requested this lift');
     const id = newId();
     const token = newToken('r');
-    db.prepare(`INSERT INTO requests (id,offer_id,name,area,passengers,message,phone,whatsapp,token_hash)
-      VALUES (?,?,?,?,?,?,?,?,?)`).run(
+    db.prepare(`INSERT INTO requests (id,offer_id,name,area,passengers,message,phone,phone_hmac,whatsapp,token_hash)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
       id, o.id, text(b.name, 'Name', { max: 40 }), text(b.area, 'Area', { max: 40 }), passengers,
-      optionalText(b.message, 'Message', 200), p, b.whatsapp === false ? 0 : 1, hash(token));
+      optionalText(b.message, 'Message', 200), vault.encrypt(p), mac, b.whatsapp === false ? 0 : 1, hash(token));
     res.status(201).json({ id, token });
   });
 
@@ -195,13 +211,15 @@ export function createApp(db: DB, config: Config) {
 
   type Owner = { kind: 'offer'; row: OfferRow } | { kind: 'request'; row: RequestRow };
   function owner(req: Request): Owner {
-    const m = /^Bearer\s+(\S+)$/.exec(req.get('authorization') ?? '');
+    if (peek('link:' + req.ip) >= linkMax) throw new HttpError(429, 'Too many invalid links. Please wait 15 minutes.');
+    const m = /^Bearer\s+(\S{1,200})$/.exec(req.get('authorization') ?? '');
     if (!m) throw new HttpError(401, 'Missing link token');
     const h = hash(m[1]);
     const offer = q.offerByToken.get(h) as OfferRow | undefined;
     if (offer) return { kind: 'offer', row: offer };
     const request = q.requestByToken.get(h) as RequestRow | undefined;
     if (request) return { kind: 'request', row: request };
+    count('link:' + req.ip, 15 * 60_000); // slows down anyone guessing links
     throw new HttpError(404, 'This link has expired or the entry was deleted');
   }
 
@@ -214,20 +232,20 @@ export function createApp(db: DB, config: Config) {
         status: r.status, created_at: r.created_at,
         ...(r.status === 'accepted' ? { contact: contact(r) } : {}),
       }));
-      const { phone: ph, whatsapp, ...rest } = offer;
+      const { phone: ph, phone_hmac: _m, token_hash: _t, whatsapp, ...rest } = offer;
       return {
         kind: 'offer', event: publicEvent(event),
-        offer: { ...rest, phone: '+' + ph, whatsapp: !!whatsapp, seats_left: seatsLeft(offer) },
+        offer: { ...rest, phone: '+' + vault.decrypt(ph), whatsapp: !!whatsapp, seats_left: seatsLeft(offer) },
         requests,
       };
     }
     const r = o.row;
     const offer = q.offer.get(r.offer_id) as OfferRow;
     const event = getEvent(offer.event_id);
-    const { phone: ph, whatsapp, offer_id, ...rest } = r;
+    const { phone: ph, phone_hmac: _m, token_hash: _t, whatsapp, offer_id: _o, ...rest } = r;
     return {
       kind: 'request', event: publicEvent(event),
-      request: { ...rest, phone: '+' + ph, whatsapp: !!whatsapp },
+      request: { ...rest, phone: '+' + vault.decrypt(ph), whatsapp: !!whatsapp },
       driver: {
         name: r.status === 'accepted' ? offer.name : firstName(offer.name),
         area: offer.area, depart_time: offer.depart_time, notes: offer.notes,
@@ -281,9 +299,16 @@ export function createApp(db: DB, config: Config) {
 
   const admin = (req: Request, _res: Response, next: NextFunction) => {
     if (!config.adminToken) return next(new HttpError(503, 'Admin is disabled: set ADMIN_TOKEN on the server'));
-    const given = Buffer.from(/^Bearer\s+(.+)$/.exec(req.get('authorization') ?? '')?.[1] ?? '');
-    const want = Buffer.from(config.adminToken);
-    if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) return next(new HttpError(401, 'Wrong admin password'));
+    if (peek('admin:' + req.ip) >= adminMax) return next(new HttpError(429, 'Too many wrong passwords. Try again in 15 minutes.'));
+    // Compare fixed-length digests so neither content nor length leaks through timing.
+    const given = crypto.createHash('sha256').update(/^Bearer\s+(.+)$/.exec(req.get('authorization') ?? '')?.[1] ?? '').digest();
+    const want = crypto.createHash('sha256').update(config.adminToken).digest();
+    if (!crypto.timingSafeEqual(given, want)) {
+      const n = count('admin:' + req.ip, 15 * 60_000);
+      if (n === adminMax) console.warn(`Security: organiser login locked for 15 minutes after ${n} failed attempts`);
+      return next(new HttpError(401, 'Wrong admin password'));
+    }
+    if (req.method !== 'GET') console.log(`Audit: organiser ${req.method} ${req.path}`); // ids only, no personal data
     next();
   };
 

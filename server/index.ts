@@ -3,21 +3,34 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb, purgeExpired } from './db.ts';
 import { createApp, newId } from './app.ts';
+import { createVault, loadKey } from './crypto.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const prod = process.env.NODE_ENV === 'production';
 const port = Number(process.env.PORT ?? 3000);
 
+const dbPath = process.env.DB_PATH ?? path.join(ROOT, 'flowride.db');
+
+// A short organiser password can be guessed; refuse it rather than run insecurely.
+let adminToken = process.env.ADMIN_TOKEN || null;
+if (adminToken && adminToken.length < 16) {
+  console.warn('Security: ADMIN_TOKEN is shorter than 16 characters, so the organiser dashboard is disabled. Use e.g. `openssl rand -base64 24`.');
+  adminToken = null;
+}
+
 const config = {
-  adminToken: process.env.ADMIN_TOKEN || null,
+  adminToken,
   retentionDays: Number(process.env.RETENTION_DAYS ?? 7),
   controllerName: process.env.CONTROLLER_NAME ?? 'FlowRide (set CONTROLLER_NAME)',
   privacyEmail: process.env.PRIVACY_EMAIL ?? 'privacy@example.org (set PRIVACY_EMAIL)',
   publicUrl: process.env.PUBLIC_URL ?? `http://localhost:${port}`,
   rateLimit: Number(process.env.RATE_LIMIT ?? 30),
+  adminMaxFails: Number(process.env.ADMIN_MAX_FAILS ?? 10),
+  linkMaxFails: Number(process.env.LINK_MAX_FAILS ?? 30),
+  vault: createVault(loadKey(process.env.DATA_KEY, process.env.DATA_KEY_FILE ?? dbPath + '.key')),
 };
 
-const db = openDb(process.env.DB_PATH ?? path.join(ROOT, 'flowride.db'));
+const db = openDb(dbPath);
 
 /** Convert a Europe/London wall-clock time to a UTC ISO string. */
 function london(date: Date, hh: number, mm: number) {
@@ -47,11 +60,21 @@ setInterval(purge, 3600_000).unref();
 
 const app = createApp(db, config);
 
+// Vulnerability disclosure contact (RFC 9116, recommended by the NCSC).
+app.get('/.well-known/security.txt', (_req, res) => {
+  const expires = new Date(Date.now() + 180 * 86400_000).toISOString();
+  res.type('text/plain').send(`Contact: mailto:${(process.env.SECURITY_EMAIL ?? config.privacyEmail).split(' ')[0]}\nExpires: ${expires}\nPreferred-Languages: en\nCanonical: ${config.publicUrl}/.well-known/security.txt\n`);
+});
+
 if (prod) {
   const dist = path.join(ROOT, 'dist');
-  app.use('/assets', express.static(path.join(dist, 'assets'), { immutable: true, maxAge: '1y' }));
+  // fallthrough: false → a missing asset is a real 404, not the app's HTML
+  app.use('/assets', express.static(path.join(dist, 'assets'), { immutable: true, maxAge: '1y', fallthrough: false }));
   app.use(express.static(dist, { index: false, setHeaders: res => res.set('Cache-Control', 'no-cache') }));
   app.get('*', (_req, res) => res.set('Cache-Control', 'no-cache').sendFile(path.join(dist, 'index.html')));
+  app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    res.status(err?.status ?? 500).type('text/plain').send(err?.status === 404 ? 'Not found' : 'Error');
+  });
 } else {
   const { createServer } = await import('vite');
   const vite = await createServer({ root: ROOT, server: { middlewareMode: true }, appType: 'spa' });

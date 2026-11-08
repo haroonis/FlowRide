@@ -3,16 +3,16 @@
 /* System fonts only: no third-party font requests (Google Fonts would send every visitor's IP to Google). */
 @theme {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --color-brand: #059669;
+  --color-brand: #047857; /* 5.5:1 on white, passes WCAG AA */
   --color-brand-soft: #ecfdf5;
   --color-brand-dark: #064e3b;
   --color-ink: #0f172a;
-  --color-wa: #128c4b;
+  --color-wa: #0b7a3e; /* WhatsApp-style green darkened for contrast */
 }
 
 @layer base {
   html { -webkit-tap-highlight-color: transparent; }
-  body { @apply bg-slate-50 text-ink antialiased; }
+  body { @apply bg-slate-50 text-ink antialiased; overflow-wrap: anywhere; } /* long names never push the page sideways */
   input, select, textarea { font-size: 16px; } /* stops iOS zooming into fields */
 }
 

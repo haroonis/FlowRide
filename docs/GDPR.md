@@ -49,11 +49,12 @@ If FlowRide is run by a religious not-for-profit only for its members, Art. 9(2)
 No cookies. `localStorage` holds only the user's own private links, and `sessionStorage` holds the organiser password for the session. Both are *strictly necessary* for a service the user requested (PECR reg. 6(4)), so no consent banner is needed. No analytics and no third-party requests: fonts are system fonts, deliberately avoiding Google Fonts, which sends visitor IPs to Google.
 
 ## 8. Security
-- HTTPS required in production; `Content-Security-Policy` restricted to the site itself; `Referrer-Policy: no-referrer`, so private links can't leak to WhatsApp or other sites.
+- Phone numbers are **encrypted at rest** (AES-256-GCM, key held outside the database). See [SECURITY.md](SECURITY.md).
+- HTTPS required in production (HSTS); `Content-Security-Policy` restricted to the site itself; `Referrer-Policy: no-referrer`, so private links can't leak to WhatsApp or other sites.
 - Private links are 192-bit random tokens, stored only as SHA-256 hashes. Opening a `/m/<token>` link saves it and immediately removes it from the address bar.
 - Organiser password comes from `ADMIN_TOKEN` and is compared in constant time.
 - Rate limiting on sign-ups; strict input validation; request bodies are never logged.
-- SQLite file should live on an encrypted disk with restricted permissions.
+- SQLite file should live on an encrypted disk with restricted permissions, with `DATA_KEY` kept separately.
 
 ## 9. Safeguarding
 - 18+ confirmation for drivers and riders; children travel as part of an adult's group.

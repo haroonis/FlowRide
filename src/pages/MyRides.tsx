@@ -3,7 +3,7 @@ import { Bell, Check, Copy, Download, MessageCircle, Trash2, X } from 'lucide-re
 import { api, ApiError, type MeView, type OfferView, type RequestView } from '../api';
 import { fmt12, fmtWhen, manageUrl, waShare } from '../format';
 import { linkProps } from '../router';
-import { forget, loadSaved, type Saved } from '../store';
+import { forget, loadSaved, storageWorks, type Saved } from '../store';
 import { Alert, Button, ContactButtons, LinkButton, Spinner, StatusPill, useToast } from '../ui';
 
 type Item = { saved: Saved; view?: MeView; error?: string };
@@ -82,6 +82,7 @@ function SavedNotice({ item, kind, onCopy }: { item: Item; kind: string; onCopy:
       <p className="font-bold">{kind === 'offer' ? 'Your lift is listed!' : 'Request sent!'}</p>
       <p className="mt-1">{kind === 'offer' ? "Riders can now ask for a seat. You'll see their requests here." : "The driver will accept or decline. Check back here to see when they reply."}</p>
       <p className="mt-2">Save your private link so you can get back here from any phone. Anyone with the link can manage this entry, so keep it to yourself.</p>
+      {!storageWorks() && <p className="mt-2 font-bold">Your browser isn't saving data for this site (private mode?), so save this link now or you'll lose access when you close the page.</p>}
       <div className="mt-3 flex flex-wrap gap-2">
         <LinkButton variant="wa" external href={waShare(`My FlowRide link for ${item.saved.title} (keep private): ${url}`)}><MessageCircle className="h-4 w-4" />Send to myself on WhatsApp</LinkButton>
         <Button variant="outline" onClick={async () => { try { await navigator.clipboard.writeText(url); onCopy(); } catch {} }}><Copy className="h-4 w-4" />Copy link</Button>

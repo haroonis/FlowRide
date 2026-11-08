@@ -27,7 +27,8 @@ export function openDb(file: string): DB {
       depart_time TEXT NOT NULL,         -- HH:MM, local time
       seats INTEGER NOT NULL CHECK (seats BETWEEN 1 AND 8),
       notes TEXT NOT NULL DEFAULT '',
-      phone TEXT NOT NULL,               -- E.164 digits, shown only to accepted riders
+      phone TEXT NOT NULL,               -- AES-256-GCM ciphertext; shown only to accepted riders
+      phone_hmac TEXT NOT NULL,          -- keyed hash, for duplicate checks without decrypting
       whatsapp INTEGER NOT NULL DEFAULT 1,
       token_hash TEXT NOT NULL UNIQUE,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
@@ -41,7 +42,8 @@ export function openDb(file: string): DB {
       area TEXT NOT NULL,
       passengers INTEGER NOT NULL CHECK (passengers BETWEEN 1 AND 8),
       message TEXT NOT NULL DEFAULT '',
-      phone TEXT NOT NULL,               -- shown to the driver only after they accept
+      phone TEXT NOT NULL,               -- AES-256-GCM ciphertext; shown to the driver only after they accept
+      phone_hmac TEXT NOT NULL,
       whatsapp INTEGER NOT NULL DEFAULT 1,
       status TEXT NOT NULL DEFAULT 'pending'
         CHECK (status IN ('pending','accepted','declined','cancelled')),

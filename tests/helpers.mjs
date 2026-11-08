@@ -45,7 +45,7 @@ export async function startServer(env = {}) {
     return { status: res.status, json, text, headers: res.headers };
   };
   return {
-    base, api, output: () => out,
+    base, api, output: () => out, dbPath: path.join(dir, 'test.db'),
     alive: () => proc.exitCode === null,
     db: () => new Database(path.join(dir, 'test.db')),
     async stop() { proc.kill('SIGTERM'); await new Promise(r => proc.exitCode !== null ? r() : proc.on('exit', r)); rmSync(dir, { recursive: true, force: true }); },

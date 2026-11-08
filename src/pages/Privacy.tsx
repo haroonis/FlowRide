@@ -48,7 +48,7 @@ export default function Privacy() {
       <p>You must be 18 or over to offer or request a lift. Children can travel as part of an adult's group.</p>
 
       <h2>Security</h2>
-      <p>Data is sent over HTTPS. Private links are random and stored only as a one-way hash, and we never log what you type into forms.</p>
+      <p>Data is sent over HTTPS, and phone numbers are encrypted in our database. Private links are random and stored only as a one-way hash. We never log what you type into forms. To report a security problem, see <a className="font-semibold text-brand" href="/.well-known/security.txt">security.txt</a>.</p>
     </article>
   );
 }

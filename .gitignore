@@ -4,6 +4,7 @@ dist/
 *.db-shm
 *.db-wal
 .env
+*.key
 .env.*
 !.env.example
 mobile/node_modules/
