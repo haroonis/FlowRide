@@ -1,0 +1,11 @@
+{
+  "name": "flowride",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Ride sharing for local events",
+  "scripts": {
+    "test": "node --test --test-reporter=spec tests/*.test.mjs"
+  },
+  "engines": { "node": ">=20" }
+}
