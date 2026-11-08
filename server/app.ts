@@ -93,7 +93,21 @@ export function createApp(db: DB, config: Config) {
     next();
   });
   app.use('/api', express.json({ limit: '20kb' }));
-  app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+  app.use('/api', (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    // Answer "304 Not Modified" (an empty reply) when the app already has this exact data.
+    // Browsers add "Cache-Control: no-cache" to hand-made If-None-Match requests, which makes
+    // Express's own check give up, so compare the ETag directly. Data is never cached server-side.
+    Object.defineProperty(req, 'fresh', {
+      configurable: true,
+      get() {
+        const inm = req.headers['if-none-match'], etag = res.get('ETag'), st = res.statusCode;
+        return (req.method === 'GET' || req.method === 'HEAD') && st >= 200 && st < 300 && !!inm && !!etag
+          && inm.split(/\s*,\s*/).includes(etag);
+      },
+    });
+    next();
+  });
 
   // In-memory counters per IP (nothing persisted, so no extra personal data is kept).
   const hits = new Map<string, { n: number; reset: number }>();

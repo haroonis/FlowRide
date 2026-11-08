@@ -1,11 +1,14 @@
 import express from 'express';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb, purgeExpired } from './db.ts';
 import { createApp, newId } from './app.ts';
 import { createVault, loadKey } from './crypto.ts';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// Source runs from server/; the bundled release runs from the folder that holds dist/.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = fs.existsSync(path.join(HERE, 'dist')) ? HERE : path.resolve(HERE, '..');
 const prod = process.env.NODE_ENV === 'production';
 const port = Number(process.env.PORT ?? 3000);
 

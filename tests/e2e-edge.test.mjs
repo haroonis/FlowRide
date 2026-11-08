@@ -150,7 +150,7 @@ describe('Browser edge cases', { skip }, () => {
       };
     });
     await p.goto(s.base);
-    assert.ok(await p.evaluate(() => document.documentElement.classList.contains('native-app')));
+    await p.waitForFunction(() => document.documentElement.classList.contains('native-app') && typeof window.__back === 'function');
     assert.equal(await p.evaluate(() => navigator.serviceWorker.getRegistrations().then(r => r.length)), 0, 'no service worker inside the app');
     await p.getByText("Jumu'ah at Didsbury Mosque").click();
     await p.getByRole('button', { name: 'Share', exact: true }).click();
@@ -160,6 +160,17 @@ describe('Browser edge cases', { skip }, () => {
     await p.waitForURL(s.base + '/');
     await p.evaluate(() => window.__back());
     assert.ok(await p.evaluate(() => window.__log.some(l => l[0] === 'exit')), 'back on home screen should exit the app');
+    await p.context().close();
+  });
+
+  test("a driver waiting on My rides is alerted to their very first request", async () => {
+    const o = (await s.api('POST', `/api/events/${ev.id}/offers`, driver({ phone: phone() }))).json;
+    const p = await page();
+    await p.goto(`${s.base}/m/${o.token}`);
+    await p.getByText('No requests yet').waitFor();
+    await s.api('POST', `/api/offers/${o.id}/requests`, rider({ name: 'First Rider', phone: phone() }));
+    await p.getByText('You have an update on your lift').waitFor({ timeout: 30_000 });
+    await p.getByText('First Rider').waitFor();
     await p.context().close();
   });
 

@@ -98,7 +98,7 @@ describe('E2E on a phone', { skip }, () => {
     assert.match(dwa, /^https:\/\/wa\.me\/447700900222\?text=Hi%20Fatima/);
     assert.equal(await driverPage.getByRole('link', { name: 'Call' }).getAttribute('href'), 'tel:+447700900222');
 
-    await riderPage.getByText("You're in!").waitFor({ timeout: 20_000 }); // picked up by polling
+    await riderPage.getByText("You're in!").waitFor({ timeout: 30_000 }); // picked up by polling (every 20s at first)
     const rwa = await riderPage.getByRole('link', { name: 'WhatsApp', exact: true }).getAttribute('href');
     assert.match(rwa, /^https:\/\/wa\.me\/447700900111\?text=Hi%20Usman/);
   });

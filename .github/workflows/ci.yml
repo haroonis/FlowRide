@@ -78,3 +78,78 @@ jobs:
         with:
           name: flowride-ios-simulator
           path: FlowRide-simulator.zip
+
+  deploy:
+    name: Deploy to Oracle Cloud
+    needs: web
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/repo-comparison-testing-jrdgtb')
+    runs-on: ubuntu-latest
+    concurrency: { group: deploy-oracle, cancel-in-progress: false }
+    env:
+      OCI_HOST: ${{ secrets.OCI_HOST }}
+      OCI_USER: ${{ secrets.OCI_USER || 'ubuntu' }}
+    steps:
+      - name: Check deployment secrets
+        id: check
+        env:
+          HAS_KEY: ${{ secrets.OCI_SSH_KEY != '' }}
+          HAS_ADMIN: ${{ secrets.ADMIN_TOKEN != '' }}
+          HAS_DATA_KEY: ${{ secrets.DATA_KEY != '' }}
+        run: |
+          if [ -n "$OCI_HOST" ] && [ "$HAS_KEY" = true ] && [ "$HAS_ADMIN" = true ] && [ "$HAS_DATA_KEY" = true ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Skipping deploy: add OCI_HOST, OCI_SSH_KEY, ADMIN_TOKEN and DATA_KEY secrets (see docs/ORACLE.md)."
+          fi
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.ready == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.ready == 'true'
+        with: { node-version: 22, cache: npm }
+      - name: Build release
+        if: steps.check.outputs.ready == 'true'
+        run: npm ci && npm run release && tar -czf release.tgz -C release .
+      - name: Set up SSH
+        if: steps.check.outputs.ready == 'true'
+        env:
+          OCI_SSH_KEY: ${{ secrets.OCI_SSH_KEY }}
+          OCI_HOST_KEY: ${{ secrets.OCI_HOST_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$OCI_SSH_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          if [ -n "$OCI_HOST_KEY" ]; then
+            printf '%s %s\n' "$OCI_HOST" "$OCI_HOST_KEY" > ~/.ssh/known_hosts   # pinned host key (recommended)
+          else
+            echo "::warning::OCI_HOST_KEY not set; trusting the server's key on first use."
+            ssh-keyscan -T 15 -t ed25519 "$OCI_HOST" > ~/.ssh/known_hosts
+          fi
+          printf 'Host oci\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/id_deploy\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ConnectTimeout 20\n' "$OCI_HOST" "$OCI_USER" > ~/.ssh/config
+      - name: Upload and set up server
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          scp -q release.tgz deploy/setup-server.sh deploy/deploy.sh oci:/tmp/
+          ssh oci 'sudo bash /tmp/setup-server.sh'
+      - name: Write app settings (secrets never touch the disk on this runner or the command line)
+        if: steps.check.outputs.ready == 'true'
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          DATA_KEY: ${{ secrets.DATA_KEY }}
+          CONTROLLER_NAME: ${{ secrets.CONTROLLER_NAME }}
+          PRIVACY_EMAIL: ${{ secrets.PRIVACY_EMAIL }}
+          SECURITY_EMAIL: ${{ secrets.SECURITY_EMAIL }}
+          SITE_DOMAIN: ${{ secrets.SITE_DOMAIN }}
+        run: |
+          domain="${SITE_DOMAIN:-$(echo "$OCI_HOST" | tr . -).sslip.io}"
+          echo "SITE=$domain" >> "$GITHUB_ENV"
+          q() { printf '%s="%s"\n' "$1" "$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
+          { q ADMIN_TOKEN "$ADMIN_TOKEN"; q DATA_KEY "$DATA_KEY"; q CONTROLLER_NAME "$CONTROLLER_NAME"
+            q PRIVACY_EMAIL "$PRIVACY_EMAIL"; q SECURITY_EMAIL "$SECURITY_EMAIL"; q PUBLIC_URL "https://$domain"; } \
+            | ssh oci 'sudo install -m 600 -o root -g root /dev/stdin /etc/flowride/flowride.env'
+      - name: Deploy (rolls back automatically if unhealthy)
+        if: steps.check.outputs.ready == 'true'
+        run: ssh oci "sudo bash /tmp/deploy.sh /tmp/release.tgz ${GITHUB_SHA::12}-${GITHUB_RUN_NUMBER} $SITE"
+      - name: Check the live site
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          for i in 1 2 3 4 5 6; do curl -fsS "https://$SITE/api/config" >/dev/null && { echo "Live at https://$SITE"; exit 0; }; sleep 10; done
+          echo "::warning::Deployed, but https://$SITE is not reachable yet. Check the OCI security list allows ports 80 and 443."

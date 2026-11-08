@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { startServer, driver, rider, ADMIN } from './helpers.mjs';
 
 let s, ev;
-before(async () => { s = await startServer(); ev = (await s.api('GET', '/api/events')).json[0]; });
+before(async () => { s = await startServer({ RATE_LIMIT: '1000' }); ev = (await s.api('GET', '/api/events')).json[0]; });
 after(() => s?.stop());
 
 async function offer(o) { const r = await s.api('POST', `/api/events/${ev.id}/offers`, driver(o)); assert.equal(r.status, 201, r.text); return r.json; }
@@ -156,6 +156,28 @@ describe('automatic deletion after the event', () => {
     assert.ok(p.json.purged_events >= 1);
     assert.equal((await s.api('GET', '/api/me', undefined, o.token)).status, 404);
     assert.equal((await s.api('GET', '/api/me', undefined, r.token)).status, 404);
+  });
+});
+
+describe('low data use', () => {
+  test('unchanged data is answered with an empty 304, changed data with a fresh 200', async () => {
+    const o = (await s.api('POST', `/api/events/${ev.id}/offers`, driver({ phone: '07700 900999' }))).json;
+    const first = await s.api('GET', '/api/me', undefined, o.token);
+    const etag = first.headers.get('etag');
+    assert.ok(etag);
+    const again = await fetch(s.base + '/api/me', { headers: { Authorization: `Bearer ${o.token}`, 'If-None-Match': etag } });
+    assert.equal(again.status, 304);
+    assert.equal((await again.text()).length, 0);
+    await s.api('POST', `/api/offers/${o.id}/requests`, rider({ phone: '07700 900998' }));
+    const changed = await fetch(s.base + '/api/me', { headers: { Authorization: `Bearer ${o.token}`, 'If-None-Match': etag } });
+    assert.equal(changed.status, 200);
+  });
+  test('one person\'s 304 never reveals another person\'s data (ETag is per response)', async () => {
+    const a = (await s.api('POST', `/api/events/${ev.id}/offers`, driver({ phone: '07700 900997' }))).json;
+    const b = (await s.api('POST', `/api/events/${ev.id}/offers`, driver({ phone: '07700 900996' }))).json;
+    const etagA = (await s.api('GET', '/api/me', undefined, a.token)).headers.get('etag');
+    const asB = await fetch(s.base + '/api/me', { headers: { Authorization: `Bearer ${b.token}`, 'If-None-Match': etagA } });
+    assert.equal(asB.status, 200);
   });
 });
 

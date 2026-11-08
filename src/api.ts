@@ -21,17 +21,27 @@ export interface SiteConfig { controllerName: string; privacyEmail: string; rete
 
 export class ApiError extends Error { constructor(public status: number, message: string) { super(message); } }
 
+// Remember the last reply to each GET so the server can answer "304 Not Modified"
+// (an empty response) when nothing has changed. Kept in memory only, never on disk.
+const lastSeen = new Map<string, { etag: string; data: unknown }>();
+
 async function call<T>(method: string, url: string, body?: unknown, token?: string): Promise<T> {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = `Bearer ${token}`;
+  const key = `${url}|${token ?? ''}`;
+  const prev = method === 'GET' ? lastSeen.get(key) : undefined;
+  if (prev) headers['If-None-Match'] = prev.etag;
   let res: Response;
   try {
     res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   } catch {
     throw new ApiError(0, "Can't reach FlowRide. Check your connection and try again.");
   }
+  if (res.status === 304 && prev) return prev.data as T;
   const data = await res.json().catch(() => null);
+  const etag = res.headers.get('ETag');
+  if (method === 'GET' && res.ok && etag && data !== null) lastSeen.set(key, { etag, data });
   if (!res.ok) throw new ApiError(res.status, data?.error ?? `Something went wrong (${res.status})`);
   if (data === null) throw new ApiError(res.status, 'Unexpected response from server');
   return data as T;

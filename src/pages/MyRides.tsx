@@ -7,7 +7,9 @@ import { forget, loadSaved, storageWorks, type Saved } from '../store';
 import { Alert, Button, ContactButtons, LinkButton, Spinner, StatusPill, useToast } from '../ui';
 
 type Item = { saved: Saved; view?: MeView; error?: string };
-const POLL_MS = 15_000;
+// Check often just after something happens, then back off: 20s → 30s → 45s … up to 2 minutes.
+// Paused while the page is hidden. Unchanged replies are empty "304" responses.
+const POLL_MIN = 20_000, POLL_MAX = 120_000;
 
 export default function MyRides() {
   const fresh = new URLSearchParams(window.location.search).get('new');
@@ -26,22 +28,30 @@ export default function MyRides() {
     }));
     const list = result.filter(Boolean) as Item[];
     // Tell the user when something changed since the last check.
+    let changed = false;
     for (const it of list) {
       if (!it.view) continue;
       const sig = signature(it.view);
       const old = prev.current.get(it.saved.token);
-      if (old && old !== sig && !silent) { showToast(changeMessage(it.view)); navigator.vibrate?.(200); }
+      if (old !== undefined && old !== sig) { changed = true; if (!silent) { showToast(changeMessage(it.view)); navigator.vibrate?.(200); } }
       prev.current.set(it.saved.token, sig);
     }
     setItems(list);
+    return changed;
   }, [showToast]);
 
   useEffect(() => {
-    refresh(true);
-    const t = setInterval(() => document.visibilityState === 'visible' && refresh(), POLL_MS);
-    const vis = () => document.visibilityState === 'visible' && refresh();
+    let delay = POLL_MIN, timer: ReturnType<typeof setTimeout> | undefined, stopped = false;
+    const schedule = () => { clearTimeout(timer); if (!stopped && document.visibilityState === 'visible') timer = setTimeout(tick, delay); };
+    const tick = async () => {
+      const changed = await refresh().catch(() => false);
+      delay = changed ? POLL_MIN : Math.min(POLL_MAX, Math.round(delay * 1.5));
+      schedule();
+    };
+    const vis = () => { if (document.visibilityState === 'visible') { delay = POLL_MIN; tick(); } else clearTimeout(timer); };
+    refresh(true).then(schedule);
     document.addEventListener('visibilitychange', vis);
-    return () => { clearInterval(t); document.removeEventListener('visibilitychange', vis); };
+    return () => { stopped = true; clearTimeout(timer); document.removeEventListener('visibilitychange', vis); };
   }, [refresh]);
 
   if (!items) return <Spinner />;

@@ -3,7 +3,7 @@
 Lift sharing for local events: Friday prayers, community days, matches, meetups.
 Drivers offer spare seats, riders ask for one, and once the driver accepts, both can chat on **WhatsApp** or call to sort out pick-up.
 
-**No app install and no account needed.** It runs in any phone browser, can be added to the home screen, and also ships as an iPhone/Android app that wraps the same website ([mobile/](mobile/README.md)).
+**No app install and no account needed.** First visit is about 36 KB; after that, pages cost about 1 KB. It runs in any phone browser, can be added to the home screen, and also ships as an iPhone/Android app that wraps the same website ([mobile/](mobile/README.md)).
 
 ## How it works
 
@@ -38,7 +38,11 @@ See `.env.example` for all settings.
 
 ## Deploy
 
-FlowRide needs a small always-on Node server (SQLite database file). **Netlify static hosting is not enough**, because there would be nowhere to store lifts. Good options:
+FlowRide needs a small always-on Node server (SQLite database file). **Netlify static hosting is not enough**, because there would be nowhere to store lifts.
+
+**Recommended: Oracle Cloud Always Free.** Pushes to `main` deploy automatically via GitHub Actions. Setup steps and capacity numbers: [docs/ORACLE.md](docs/ORACLE.md).
+
+Other options:
 
 - **Docker** on any VM (e.g. your Oracle Cloud instance): `docker build -t flowride . && docker run -d -p 3000:3000 -v flowride-data:/data --env-file .env flowride`. Put Caddy or nginx in front for HTTPS.
 - **Fly.io / Render / Railway:** use the Dockerfile and mount a persistent volume at `/data`.
