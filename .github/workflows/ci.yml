@@ -42,7 +42,7 @@ jobs:
         working-directory: mobile/android
         # Retries ride out temporary GitHub download errors (Gradle is served from GitHub releases)
         run: for i in 1 2 3 4; do ./gradlew assembleDebug --no-daemon && exit 0; echo "Retry $i"; sleep $((i * 30)); done; exit 1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: flowride-android-debug
           path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
@@ -74,7 +74,7 @@ jobs:
             -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
       - name: Zip app
         run: cd mobile/ios/App/build/Build/Products/Debug-iphonesimulator && zip -qr $GITHUB_WORKSPACE/FlowRide-simulator.zip App.app
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: flowride-ios-simulator
           path: FlowRide-simulator.zip
