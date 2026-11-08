@@ -29,7 +29,8 @@ jobs:
         with: { node-version: 22, cache: npm, cache-dependency-path: mobile/package-lock.json }
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 21 }
-      - uses: android-actions/setup-android@v3
+      - name: Use the runner's pre-installed Android SDK
+        run: echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> $GITHUB_ENV && yes | ${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
       - name: Install and sync
         working-directory: mobile
         env:
@@ -58,7 +59,10 @@ jobs:
       - name: Build for simulator
         working-directory: mobile/ios/App
         run: |
-          xcodebuild -project App.xcodeproj -scheme App -configuration Debug \
+          # Clear a stale Swift package cache on the runner (Xcode "already exists in file system" bug)
+          rm -rf ~/Library/Caches/org.swift.swiftpm ~/Library/org.swift.swiftpm
+          xcodebuild -resolvePackageDependencies -project App.xcodeproj -scheme App -clonedSourcePackagesDirPath build/spm
+          xcodebuild -clonedSourcePackagesDirPath build/spm -project App.xcodeproj -scheme App -configuration Debug \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
       - name: Zip app
