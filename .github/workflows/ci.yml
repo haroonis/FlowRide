@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  web:
+    name: Website – type-check, build, tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - name: Install Playwright for browser tests
+        run: npm i --no-save playwright@1.63.0 && npx playwright install --with-deps chromium
+      - run: npm test
+
+  android:
+    name: Android app – debug APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: mobile/package-lock.json }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - uses: android-actions/setup-android@v3
+      - name: Install and sync
+        working-directory: mobile
+        env:
+          FLOWRIDE_URL: ${{ vars.FLOWRIDE_URL || 'https://flowride.example.org' }}
+        run: npm ci && npx cap sync android
+      - name: Build APK
+        working-directory: mobile/android
+        run: ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flowride-android-debug
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+
+  ios:
+    name: iOS app – simulator build (unsigned)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: mobile/package-lock.json }
+      - name: Install and sync
+        working-directory: mobile
+        env:
+          FLOWRIDE_URL: ${{ vars.FLOWRIDE_URL || 'https://flowride.example.org' }}
+        run: npm ci && npx cap sync ios
+      - name: Build for simulator
+        working-directory: mobile/ios/App
+        run: |
+          xcodebuild -project App.xcodeproj -scheme App -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+      - name: Zip app
+        run: cd mobile/ios/App/build/Build/Products/Debug-iphonesimulator && zip -qr $GITHUB_WORKSPACE/FlowRide-simulator.zip App.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flowride-ios-simulator
+          path: FlowRide-simulator.zip
