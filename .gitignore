@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.db
+*.db-shm
+*.db-wal
+.env
+*.key
+.env.*
+!.env.example
+mobile/node_modules/
+mobile/android/app/build/
+mobile/android/.gradle/
+mobile/ios/App/build/
+mobile/ios/App/Pods/
+release/
