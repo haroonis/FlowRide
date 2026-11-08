@@ -10,7 +10,7 @@ jobs:
     name: Website – type-check, build, tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
@@ -26,7 +26,7 @@ jobs:
     name: Android app – debug APK
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: mobile/package-lock.json }
       - uses: actions/setup-java@v4
@@ -51,7 +51,7 @@ jobs:
     name: iOS app – simulator build (unsigned)
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: mobile/package-lock.json }
       - name: Install and sync
@@ -101,7 +101,7 @@ jobs:
           else
             echo "::notice::Skipping deploy: add OCI_HOST, OCI_SSH_KEY, ADMIN_TOKEN and DATA_KEY secrets (see docs/ORACLE.md)."
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.check.outputs.ready == 'true'
       - uses: actions/setup-node@v4
         if: steps.check.outputs.ready == 'true'
