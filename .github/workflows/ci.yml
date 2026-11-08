@@ -38,7 +38,8 @@ jobs:
         run: npm ci && npx cap sync android
       - name: Build APK
         working-directory: mobile/android
-        run: ./gradlew assembleDebug --no-daemon
+        # Retries ride out temporary GitHub download errors (Gradle is served from GitHub releases)
+        run: for i in 1 2 3 4; do ./gradlew assembleDebug --no-daemon && exit 0; echo "Retry $i"; sleep $((i * 30)); done; exit 1
       - uses: actions/upload-artifact@v4
         with:
           name: flowride-android-debug
@@ -61,7 +62,11 @@ jobs:
         run: |
           # Clear a stale Swift package cache on the runner (Xcode "already exists in file system" bug)
           rm -rf ~/Library/Caches/org.swift.swiftpm ~/Library/org.swift.swiftpm
-          xcodebuild -resolvePackageDependencies -project App.xcodeproj -scheme App -clonedSourcePackagesDirPath build/spm
+          for i in 1 2 3 4; do
+            rm -rf ~/Library/Caches/org.swift.swiftpm
+            xcodebuild -resolvePackageDependencies -project App.xcodeproj -scheme App -clonedSourcePackagesDirPath build/spm && break
+            [ $i = 4 ] && exit 1; echo "Retry $i"; sleep $((i * 30))
+          done
           xcodebuild -clonedSourcePackagesDirPath build/spm -project App.xcodeproj -scheme App -configuration Debug \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
