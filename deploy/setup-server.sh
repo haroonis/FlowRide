@@ -16,6 +16,16 @@ case "$(uname -m)" in
   *) echo "Unsupported CPU $(uname -m)"; exit 1 ;;
 esac
 
+echo "==> Base packages and automatic security updates"
+if command -v dnf >/dev/null; then                 # Oracle Linux 8/9
+  dnf install -y -q tar xz curl dnf-automatic >/dev/null
+  # Install security updates daily (Cyber Essentials: patch within 14 days)
+  sed -i 's/^upgrade_type.*/upgrade_type = security/; s/^apply_updates.*/apply_updates = yes/' /etc/dnf/automatic.conf
+  systemctl enable --now dnf-automatic.timer >/dev/null 2>&1 || true
+elif command -v apt-get >/dev/null; then          # Ubuntu (unattended-upgrades is on by default)
+  command -v xz >/dev/null || { apt-get update -qq && apt-get install -y -qq xz-utils >/dev/null; }
+fi
+
 echo "==> Swap (the 1 GB Micro VM needs it for npm installs)"
 if [ "$(awk '/MemTotal/ {print $2}' /proc/meminfo)" -lt 2000000 ] && ! swapon --show | grep -q .; then
   fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
@@ -45,8 +55,8 @@ if ! /usr/local/bin/caddy version 2>/dev/null | grep -q "v$CADDY_VERSION"; then
 fi
 
 echo "==> Users and folders"
-id flowride >/dev/null 2>&1 || useradd --system --home "$DATA" --shell /usr/sbin/nologin flowride
-id caddy >/dev/null 2>&1 || useradd --system --home /var/lib/caddy --shell /usr/sbin/nologin caddy
+id flowride >/dev/null 2>&1 || useradd --system --home "$DATA" --shell "$(command -v nologin || echo /sbin/nologin)" flowride
+id caddy >/dev/null 2>&1 || useradd --system --home /var/lib/caddy --shell "$(command -v nologin || echo /sbin/nologin)" caddy
 install -d -m 755 "$APP" "$APP/releases"
 install -d -m 700 -o flowride -g flowride "$DATA" "$DATA/backups"
 install -d -m 700 /etc/flowride
@@ -65,6 +75,11 @@ elif command -v iptables >/dev/null; then                                       
     else iptables -A INPUT -p tcp --dport $p -m state --state NEW -j ACCEPT; fi
   done
   command -v netfilter-persistent >/dev/null && netfilter-persistent save >/dev/null 2>&1 || true
+fi
+
+if command -v restorecon >/dev/null && command -v getenforce >/dev/null && [ "$(getenforce)" != Disabled ]; then
+  # SELinux (Oracle Linux): give the new binaries and folders their standard labels
+  restorecon -R /usr/local/bin /opt/node /opt/flowride /var/lib/flowride /var/lib/caddy /etc/caddy 2>/dev/null || true
 fi
 
 echo "==> Services"

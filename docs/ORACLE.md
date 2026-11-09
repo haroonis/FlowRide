@@ -38,7 +38,7 @@ Free resources must be created in your **home region**. In UK South (London), Ar
 
 ### 1. Create the VM
 Oracle Cloud console → **Compute → Instances → Create instance**
-- Image: **Canonical Ubuntu 24.04**
+- Image: **Oracle Linux 9** or **Canonical Ubuntu 24.04** (both supported; the login user is `opc` on Oracle Linux, `ubuntu` on Ubuntu)
 - Shape: **VM.Standard.E2.1.Micro** (Always Free eligible). Or Ampere A1 with 1 OCPU / 6 GB if it's available.
 - Networking: keep "Assign a public IPv4 address" ticked
 - SSH keys: let Oracle generate a pair and **download the private key** (that's your own admin key; keep it safe)
@@ -58,7 +58,7 @@ Open **Cloud Shell** (the `>_` icon at the top of the Oracle console) and run, r
 ssh-keygen -t ed25519 -N "" -C flowride-deploy -f ~/flowride_deploy
 # Allow the deploy key on the VM (uses the admin key you downloaded; upload it to Cloud Shell first)
 chmod 600 ~/ssh-key-*.key
-cat ~/flowride_deploy.pub | ssh -i ~/ssh-key-*.key ubuntu@IP 'cat >> ~/.ssh/authorized_keys'
+cat ~/flowride_deploy.pub | ssh -i ~/ssh-key-*.key opc@IP 'cat >> ~/.ssh/authorized_keys'   # use ubuntu@IP on Ubuntu
 cat ~/flowride_deploy                  # → secret OCI_SSH_KEY (copy everything incl. BEGIN/END lines)
 ssh-keyscan -t ed25519 IP | cut -d' ' -f2-   # → secret OCI_HOST_KEY
 openssl rand -base64 24                # → secret ADMIN_TOKEN (organiser password)
@@ -73,7 +73,7 @@ github.com → **haroonis/FlowRide → Settings → Secrets and variables → Ac
 | Secret | Value |
 |---|---|
 | `OCI_HOST` | the VM's public IP |
-| `OCI_USER` | `ubuntu` (or `opc` on Oracle Linux) |
+| `OCI_USER` | `opc` on Oracle Linux, `ubuntu` on Ubuntu |
 | `OCI_SSH_KEY` | private deploy key from step 3 |
 | `OCI_HOST_KEY` | output of the `ssh-keyscan` line (recommended: stops impostor servers) |
 | `ADMIN_TOKEN` | organiser password (16+ characters) |
@@ -112,4 +112,4 @@ This Claude sandbox can only reach approved web addresses (HTTPS through a proxy
 
 ## Afterwards
 - Point the old Netlify site at the new one: replace its content with a single `_redirects` line, `/* https://YOUR-SITE/:splat 301`.
-- Patching: Ubuntu installs security updates automatically (unattended-upgrades is on by default). Re-run the deploy monthly to pick up Node or Caddy updates by bumping the versions in `deploy/setup-server.sh`.
+- Patching: security updates install automatically (dnf-automatic on Oracle Linux, set up by the script; unattended-upgrades on Ubuntu). Re-run the deploy monthly to pick up Node or Caddy updates by bumping the versions in `deploy/setup-server.sh`.
