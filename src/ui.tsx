@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
 import { Car, LoaderCircle, MessageCircle, Phone, X } from 'lucide-react';
 import { linkProps } from './router';
 import { telLink, waLink, prettyPhone } from './format';
@@ -62,7 +62,8 @@ export function Spinner({ label = 'Loading…' }: { label?: string }) {
 }
 
 export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  useEffect(() => {
+  // Layout effect: listen for Escape as soon as the sheet is on screen, not a frame later.
+  useLayoutEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', esc);
     document.body.style.overflow = 'hidden';
