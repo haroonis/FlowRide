@@ -16,20 +16,27 @@ case "$(uname -m)" in
   *) echo "Unsupported CPU $(uname -m)"; exit 1 ;;
 esac
 
+echo "==> Swap (the 1 GB Micro VM needs it before any package installs)"
+if [ "$(awk '/MemTotal/ {print $2}' /proc/meminfo)" -lt 2000000 ] && ! swapon --show | grep -q .; then
+  fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
+  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
 echo "==> Base packages and automatic security updates"
 if command -v dnf >/dev/null; then                 # Oracle Linux 8/9
-  dnf install -y -q tar xz curl dnf-automatic >/dev/null
+  # Only install what's missing; keep dnf lean on the 1 GB VM.
+  need=""; for p in tar xz curl; do command -v $p >/dev/null || need="$need $p"; done
+  rpm -q dnf-automatic >/dev/null 2>&1 || need="$need dnf-automatic"
+  if [ -n "$need" ]; then
+    echo "    installing:$need (first run can take a few minutes on the Micro VM)"
+    # shellcheck disable=SC2086
+    timeout 900 dnf install -y --setopt=install_weak_deps=False $need
+  fi
   # Install security updates daily (Cyber Essentials: patch within 14 days)
   sed -i 's/^upgrade_type.*/upgrade_type = security/; s/^apply_updates.*/apply_updates = yes/' /etc/dnf/automatic.conf
   systemctl enable --now dnf-automatic.timer >/dev/null 2>&1 || true
 elif command -v apt-get >/dev/null; then          # Ubuntu (unattended-upgrades is on by default)
   command -v xz >/dev/null || { apt-get update -qq && apt-get install -y -qq xz-utils >/dev/null; }
-fi
-
-echo "==> Swap (the 1 GB Micro VM needs it for npm installs)"
-if [ "$(awk '/MemTotal/ {print $2}' /proc/meminfo)" -lt 2000000 ] && ! swapon --show | grep -q .; then
-  fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
-  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
 fi
 
 echo "==> Node.js $NODE_VERSION"

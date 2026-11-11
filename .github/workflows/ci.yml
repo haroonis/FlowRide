@@ -84,6 +84,7 @@ jobs:
     needs: web
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/repo-comparison-testing-jrdgtb')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     concurrency: { group: deploy-oracle, cancel-in-progress: false }
     env:
       OCI_HOST: ${{ secrets.OCI_HOST }}
