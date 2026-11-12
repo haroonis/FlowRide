@@ -24,17 +24,24 @@ fi
 
 echo "==> Base packages and automatic security updates"
 if command -v dnf >/dev/null; then                 # Oracle Linux 8/9
-  # Only install what's missing; keep dnf lean on the 1 GB VM.
+  # tar/xz/curl are needed now; on Oracle Linux images they're normally already there.
   need=""; for p in tar xz curl; do command -v $p >/dev/null || need="$need $p"; done
-  rpm -q dnf-automatic >/dev/null 2>&1 || need="$need dnf-automatic"
   if [ -n "$need" ]; then
-    echo "    installing:$need (first run can take a few minutes on the Micro VM)"
+    echo "    installing:$need"
     # shellcheck disable=SC2086
     timeout 900 dnf install -y --setopt=install_weak_deps=False $need
   fi
-  # Install security updates daily (Cyber Essentials: patch within 14 days)
-  sed -i 's/^upgrade_type.*/upgrade_type = security/; s/^apply_updates.*/apply_updates = yes/' /etc/dnf/automatic.conf
-  systemctl enable --now dnf-automatic.timer >/dev/null 2>&1 || true
+  # Automatic security updates (Cyber Essentials: patch within 14 days). dnf is slow on the
+  # 1 GB VM, so install it in the background instead of holding up the deploy.
+  if rpm -q dnf-automatic >/dev/null 2>&1; then
+    [ -f /etc/dnf/automatic.conf ] && sed -i 's/^upgrade_type.*/upgrade_type = security/; s/^apply_updates.*/apply_updates = yes/' /etc/dnf/automatic.conf
+    systemctl enable --now dnf-automatic.timer >/dev/null 2>&1 || true
+    echo "    automatic security updates: on"
+  elif ! systemctl is-active --quiet flowride-dnf-automatic 2>/dev/null; then
+    systemd-run --unit=flowride-dnf-automatic --description="Install dnf-automatic" --nice=10 \
+      sh -c "dnf install -y --setopt=install_weak_deps=False dnf-automatic && sed -i 's/^upgrade_type.*/upgrade_type = security/; s/^apply_updates.*/apply_updates = yes/' /etc/dnf/automatic.conf && systemctl enable --now dnf-automatic.timer" >/dev/null 2>&1 || true
+    echo "    automatic security updates: installing in the background"
+  fi
 elif command -v apt-get >/dev/null; then          # Ubuntu (unattended-upgrades is on by default)
   command -v xz >/dev/null || { apt-get update -qq && apt-get install -y -qq xz-utils >/dev/null; }
 fi
