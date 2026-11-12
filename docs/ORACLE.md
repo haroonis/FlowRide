@@ -12,7 +12,7 @@ Measured on this codebase: release build, behind Caddy, one CPU core, then scale
 | Each page after that | **~1 KB** (app cached on the phone) | n/a |
 | "My rides" left open 10 min, nothing changing | **7 tiny checks, < 5 KB** (empty "not modified" replies; checks slow from every 20 s to every 2 min, stop when the screen is off) | n/a |
 | Server memory | **~80 MB** Node + ~40 MB Caddy | n/a |
-| Release download | **0.35 MB** | n/a |
+| Release download | **2.6 MB** (includes the database driver, so the server installs nothing) | n/a |
 
 **Throughput on one core:** about 3,000 page loads a second and 4,500–5,200 API calls a second. The free **VM.Standard.E2.1.Micro** gets a fraction of a core (1/8 OCPU, with short bursts above that), so plan on roughly **200–400 requests a second**.
 
@@ -88,7 +88,7 @@ Also add a **variable** (Variables tab) `FLOWRIDE_URL` = your site address, so t
 ### 5. Deploy
 Push to `main` (or merge the pull request). In the **Actions** tab the *Deploy to Oracle Cloud* job then:
 1. runs all tests first
-2. builds the 0.35 MB release
+2. builds the 2.6 MB release (database driver included)
 3. sets up the server on the first run: Node 22, Caddy, firewall, a locked-down service, daily backups (downloads are checksum-verified)
 4. switches to the new version and **rolls back automatically** if it doesn't start
 5. checks the live site over HTTPS

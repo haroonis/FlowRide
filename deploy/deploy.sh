@@ -13,11 +13,15 @@ PREV=$(readlink -f "$APP/current" 2>/dev/null || true)
 echo "==> Unpacking $ID"
 rm -rf "$NEW" && mkdir -p "$NEW"
 tar -xzf "$TARBALL" -C "$NEW"
-if ! (cd "$NEW" && npm install --omit=dev --no-audit --no-fund --loglevel=error); then
-  # No prebuilt SQLite driver for this system: install compilers once and build it
-  echo "==> Building the SQLite driver from source"
-  if command -v dnf >/dev/null; then dnf install -y -q gcc-c++ make python3 >/dev/null; else apt-get install -y -qq g++ make python3 >/dev/null; fi
-  (cd "$NEW" && npm install --omit=dev --no-audit --no-fund --loglevel=error --build-from-source)
+# The release already contains the SQLite driver. Only if it can't load here
+# (e.g. an older Linux) fall back to installing/building it on the server.
+if ! (cd "$NEW" && node -e "new (require('better-sqlite3'))(':memory:').close()") 2>/dev/null; then
+  echo "==> Bundled SQLite driver doesn't fit this system; installing it on the server"
+  if ! (cd "$NEW" && npm install --omit=dev --no-audit --no-fund --loglevel=error); then
+    echo "==> Building the SQLite driver from source"
+    if command -v dnf >/dev/null; then dnf install -y -q gcc-c++ make python3 >/dev/null; else apt-get install -y -qq g++ make python3 >/dev/null; fi
+    (cd "$NEW" && npm install --omit=dev --no-audit --no-fund --loglevel=error --build-from-source)
+  fi
 fi
 command -v restorecon >/dev/null && restorecon -R "$NEW" 2>/dev/null || true
 chown -R root:root "$NEW" && chmod -R go-w "$NEW"

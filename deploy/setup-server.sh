@@ -38,8 +38,12 @@ if command -v dnf >/dev/null; then                 # Oracle Linux 8/9
     systemctl enable --now dnf-automatic.timer >/dev/null 2>&1 || true
     echo "    automatic security updates: on"
   elif ! systemctl is-active --quiet flowride-dnf-automatic 2>/dev/null; then
-    systemd-run --unit=flowride-dnf-automatic --description="Install dnf-automatic" --nice=10 \
-      sh -c "dnf install -y --setopt=install_weak_deps=False dnf-automatic && sed -i 's/^upgrade_type.*/upgrade_type = security/; s/^apply_updates.*/apply_updates = yes/' /etc/dnf/automatic.conf && systemctl enable --now dnf-automatic.timer" >/dev/null 2>&1 || true
+    # Only the BaseOS repo (much smaller metadata than all repos) and a hard memory cap,
+    # so it can never push the website out of memory on the 1 GB VM.
+    baseos=$(grep -ho '^\[ol[0-9]*_baseos_latest\]' /etc/yum.repos.d/*.repo 2>/dev/null | tr -d '[]' | head -1)
+    systemd-run --unit=flowride-dnf-automatic --description="Install dnf-automatic" --nice=15 \
+      -p MemoryMax=400M -p MemorySwapMax=600M \
+      sh -c "dnf install -y --setopt=install_weak_deps=False ${baseos:+--disablerepo=* --enablerepo=$baseos} dnf-automatic && sed -i 's/^upgrade_type.*/upgrade_type = security/; s/^apply_updates.*/apply_updates = yes/' /etc/dnf/automatic.conf && systemctl enable --now dnf-automatic.timer" >/dev/null 2>&1 || true
     echo "    automatic security updates: installing in the background"
   fi
 elif command -v apt-get >/dev/null; then          # Ubuntu (unattended-upgrades is on by default)
